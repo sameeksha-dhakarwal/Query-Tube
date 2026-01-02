@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 google-api-python-client
 pandas
 tqdm
@@ -7,3 +8,14 @@ openai-whisper
 pydub
 python-dotenv
 yt-dlp
+=======
+google-api-python-client
+pandas
+tqdm
+python-dateutil
+youtube-transcript-api
+openai-whisper
+pydub
+python-dotenv
+yt-dlp
+>>>>>>> 0b390a54e117e589f35045098ca826d07a0b45b5
