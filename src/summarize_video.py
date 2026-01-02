@@ -41,3 +41,4 @@ summary = result.stdout.decode("utf-8", errors="ignore")
 
 print("\n📝 Video Summary:\n")
 print(summary)
+
