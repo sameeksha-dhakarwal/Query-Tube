@@ -1,0 +1,15 @@
+# Virtual environment
+venv/
+__pycache__/
+
+# Generated / binary files
+*.pkl
+*.index
+
+# Sensitive files
+youtube_cookies.txt
+.env
+
+# OS files
+.DS_Store
+Thumbs.db

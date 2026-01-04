@@ -34,20 +34,32 @@ EMBEDDING_DIM = 384
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "llama3"
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
-# Load FAISS index
-if os.path.exists(INDEX_PATH):
-    index = faiss.read_index(INDEX_PATH)
-else:
-    index = faiss.IndexFlatIP(EMBEDDING_DIM)
-
 # ===============================
 # MODELS
 # ===============================
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 5
+
+# ===============================
+# FAISS (LAZY LOADING) 🔥
+# ===============================
+index = None
+
+def get_faiss_index():
+    """
+    Loads FAISS index only when needed.
+    Prevents MemoryError on Windows / Python 3.14.
+    """
+    global index
+    if index is None:
+        if os.path.exists(INDEX_PATH):
+            index = faiss.read_index(INDEX_PATH)
+        else:
+            index = faiss.IndexFlatIP(EMBEDDING_DIM)
+    return index
 
 # ===============================
 # HEALTH
@@ -67,10 +79,10 @@ def ingest_csv(file: UploadFile = File(...)):
     df = pd.read_csv(file.file)
     df.columns = df.columns.str.strip()
 
+    # Clean columns safely
     df["transcript"] = df.get("transcript", "").fillna("").astype(str)
     df["title"] = df.get("title", "").fillna("").astype(str)
     df["channel_title"] = df.get("channel_title", "").fillna("").astype(str)
-
     df["viewCount"] = pd.to_numeric(df.get("viewCount", 0), errors="coerce").fillna(0)
     df["duration_seconds"] = pd.to_numeric(df.get("duration_seconds", 0), errors="coerce").fillna(0)
 
@@ -83,20 +95,28 @@ def ingest_csv(file: UploadFile = File(...)):
     ].reset_index(drop=True)
 
     if df.empty:
-        return {"error": "No valid rows found after filtering"}
+        return {
+            "error": "No valid rows found after filtering",
+            "original_rows": original_rows
+        }
 
+    # Create embeddings
     texts = df["transcript"].tolist()
-
     embeddings = model.encode(
         texts,
         convert_to_numpy=True,
         normalize_embeddings=True
     ).astype("float32")
 
-    index = faiss.IndexFlatIP(EMBEDDING_DIM)
-    index.add(embeddings)
-    faiss.write_index(index, INDEX_PATH)
+    # 🔥 Rebuild FAISS index safely
+    idx = faiss.IndexFlatIP(EMBEDDING_DIM)
+    idx.add(embeddings)
+    faiss.write_index(idx, INDEX_PATH)
 
+    # Update global index
+    index = idx
+
+    # Store metadata
     metadata = []
     for _, row in df.iterrows():
         metadata.append({
@@ -115,7 +135,7 @@ def ingest_csv(file: UploadFile = File(...)):
         "message": "CSV ingested successfully",
         "original_rows": original_rows,
         "rows_after_filtering": len(df),
-        "vectors_stored": index.ntotal
+        "vectors_stored": idx.ntotal
     }
 
 # ===============================
@@ -130,25 +150,30 @@ def search_videos(data: SearchRequest):
     with open(METADATA_PATH, "rb") as f:
         metadata = pickle.load(f)
 
+    idx = get_faiss_index()
+
     query_embedding = model.encode(
         [data.query],
         convert_to_numpy=True,
         normalize_embeddings=True
     ).astype("float32")
 
-    distances, indices = index.search(query_embedding, data.top_k)
+    distances, indices = idx.search(query_embedding, data.top_k)
 
     results = []
-    for idx, score in zip(indices[0], distances[0]):
-        if idx < len(metadata):
-            item = metadata[idx].copy()
+    for i, score in zip(indices[0], distances[0]):
+        if i < len(metadata):
+            item = metadata[i].copy()
             item["similarity"] = round(float(score), 4)
             results.append(item)
 
-    return {"query": data.query, "results": results}
+    return {
+        "query": data.query,
+        "results": results
+    }
 
 # ===============================
-# SUMMARIZE (USING OLLAMA)
+# SUMMARIZE (OLLAMA)
 # ===============================
 @app.post("/summarize")
 def summarize_video(video_id: str):
@@ -165,11 +190,11 @@ def summarize_video(video_id: str):
         return {"error": "Video not found or transcript empty"}
 
     prompt = f"""
-    Summarize the following video transcript in 5-6 concise bullet points:
+Summarize the following video transcript in 5–6 concise bullet points.
 
-    Transcript:
-    {video['transcript']}
-    """
+Transcript:
+{video['transcript']}
+"""
 
     response = requests.post(
         OLLAMA_URL,
@@ -177,7 +202,8 @@ def summarize_video(video_id: str):
             "model": OLLAMA_MODEL,
             "prompt": prompt,
             "stream": False
-        }
+        },
+        timeout=120
     )
 
     if response.status_code != 200:
