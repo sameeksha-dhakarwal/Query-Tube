@@ -13,3 +13,11 @@ youtube_cookies.txt
 # OS files
 .DS_Store
 Thumbs.db
+
+# Large data folders (DO NOT upload)
+audio_downloads/
+glove/
+QueryTube_Infosys_Internship_NOV25/
+
+# Logs & cache
+*.log
