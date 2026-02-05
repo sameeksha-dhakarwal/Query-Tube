@@ -3,7 +3,5 @@ pandas
 tqdm
 python-dateutil
 youtube-transcript-api
-openai-whisper
-pydub
 python-dotenv
 yt-dlp
